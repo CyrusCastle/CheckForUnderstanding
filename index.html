@@ -1,0 +1,475 @@
+<html>
+	<head>
+		<title>On your whiteboards...</title>
+		<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/7.3.1/css/all.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
+		<link rel="icon" type="image/png" href="favicon.png">
+
+		<style>
+			body {
+				background-color: #FFFFFF;
+			}
+
+			.row {
+				margin: auto;
+
+				display: flex;
+  				justify-content: space-evenly;
+  				align-items: center;
+
+				width: 80%;
+				height: 4em;
+				background-color: #EBEFEB;
+
+				border-left-style: dashed;
+				border-left-width: 1em;
+				border-left-color: #1E4C21;
+
+				border-right-style: dashed;
+				border-right-width: 2em;
+				border-right-color: transparent;
+			}
+			
+			#textbox {
+				height: 2em;
+				width: 80%;
+			}
+
+			/* Draw mode: the row grows a little, but the pad stays small like the textbox */
+			#inputRow.drawMode {
+				height: 14em;
+			}
+
+			/* Shrink the space above by the same 10em, so the row grows upwards and stays on screen */
+			body.drawMode #answerArea {
+				height: calc(80% - 10em);
+			}
+
+			#drawCanvas {
+				display: none;
+
+				width: 80%;
+				height: 12em;
+				background-color: #FFFFFF;
+				border: 1px solid #1E4C21;
+				box-sizing: border-box;
+
+				cursor: crosshair;
+				touch-action: none;
+			}
+
+			#clearButton {
+				display: none;
+			}
+
+			#inputRow.drawMode #textbox {
+				display: none;
+			}
+
+			#inputRow.drawMode #drawCanvas {
+				display: block;
+			}
+
+			#inputRow.drawMode #clearButton {
+				display: inline;
+			}
+
+			#answerArea {
+				height: 80%;
+			}
+
+			#revealHintBox {
+				display: flex;
+				align-items: center;
+
+				position: absolute;
+				visibility: hidden;
+				width: 100%;
+				height: 100%;
+
+				background-color: #FFFFFF;
+			}
+
+			#revealedAnswerBox {
+				position: fixed;
+				inset: 0;
+				visibility: hidden;
+
+				display: flex;
+				align-items: center;
+				justify-content: center;
+
+				width: 100%;
+				height: 100%;
+				background-color: #FFFFFF;
+				box-sizing: border-box;
+				padding: 2vh 2vw;
+			}
+
+			#revealedAnswerTextContainer {
+				display: flex;
+				align-items: center;
+				justify-content: center;
+
+				align-content: flex-start;
+				flex-wrap: wrap;
+
+				width: 100%;
+				height: 100%;
+				min-width: 0;
+				min-height: 0;
+			}
+
+			#finalAnswerText {
+				color: #061800;
+				text-align: center;
+
+				font-size: 75vh;
+				line-height: 0.95;
+				overflow-wrap: anywhere;
+				word-break: normal;
+
+				max-width: 80%;
+				max-height: 80%;
+				margin: 0;
+			}
+
+			#finalAnswerCanvas {
+				display: none;
+
+				width: 100%;
+				height: 100%;
+				cursor: pointer;
+			}
+			
+			#submitButton {
+				color: #FFFFFF;
+				background-color: #1E4C21;
+			}
+
+			i {
+				color: #1E4C21;
+			}
+
+			a {
+				cursor: pointer;
+			}
+		</style>
+	</head>
+
+	<body>
+		<div id="answerArea">
+			<div id="revealHintBox">
+				<div class="row">
+					<h1 id="revealHintText">Press <a onclick="reveal()">[SPACE]</a> to reveal...</h1>
+				</div>
+			</div>
+			<div id="revealedAnswerBox">
+				<div id="revealedAnswerTextContainer">
+					<a onclick="reset()" id="finalAnswerText"></a>
+					<canvas onclick="reset()" id="finalAnswerCanvas"></canvas>
+				</div>
+			</div>
+		</div>
+
+		<div class="row" id="inputRow">
+			<a id="modeToggle" onclick="toggleMode()" title="Switch to draw mode"><i id="modeIcon" class="fa-solid fa-pen"></i></a>
+			<input type="text" id="textbox" placeholder="Type your answer..." autofocus="true"></input>
+			<canvas id="drawCanvas"></canvas>
+			<a id="clearButton" onclick="clearDrawing()" title="Clear drawing"><i class="fa-solid fa-eraser"></i></a>
+			<input type="button" id="submitButton" value="Submit" accesskey="enter" onclick="submit()"></input>
+		</div>
+	</body>
+
+	<script>
+			//////////////////
+			// DECLARATIONS //
+			//////////////////
+			
+			const PEN_COLOUR = '#061800';
+			const PEN_WIDTH = 4;
+
+			let drawMode = false;
+			let strokes = [];
+			let currentStroke = null;
+			let padCtx = null;
+
+			const drawCanvas = document.getElementById('drawCanvas');
+
+			///////////////
+			// LISTENERS //
+			///////////////
+
+			document.getElementById('textbox').addEventListener('keydown', function(event) {
+				if (event.key === 'Enter') {
+					event.preventDefault();
+					submit();
+				}
+			})
+
+			document.addEventListener('keydown', function(event) {
+				if (
+					event.key === 'Enter' &&
+					drawMode &&
+					document.getElementById('inputRow').style.visibility !== 'hidden'
+				) {
+					event.preventDefault();
+					submit();
+					return
+				}
+
+				if (event.key != ' '){
+					return
+				}
+
+				if (document.getElementById('revealHintBox').style.visibility === 'visible') {
+					reveal()
+				}else if (document.getElementById('revealedAnswerBox').style.visibility === 'visible') {
+					reset()
+				}
+			})
+
+			window.addEventListener('resize', () => {
+				if (
+					document.getElementById('revealedAnswerBox')
+						.style.visibility === 'visible'
+				) {
+					fitAnswer();
+				} else if (drawMode) {
+					setUpPad();
+				}
+			});
+			
+			///////////
+			// MODES //
+			///////////
+
+			function toggleMode(){
+				drawMode = !drawMode;
+
+				document.body.classList.toggle('drawMode', drawMode);
+				document.getElementById('inputRow').classList.toggle('drawMode', drawMode);
+				document.getElementById('modeIcon').className =
+					drawMode ? 'fa-solid fa-keyboard' : 'fa-solid fa-pen';
+				document.getElementById('modeToggle').title =
+					drawMode ? 'Switch to keyboard mode' : 'Switch to draw mode';
+
+				if (drawMode) {
+					setUpPad();
+				} else {
+					document.getElementById('textbox').focus();
+				}
+			}
+			
+			/////////////
+			// DRAWING //
+			/////////////
+
+			function sizeCanvas(canvas) {
+				const dpr = window.devicePixelRatio || 1;
+				const rect = canvas.getBoundingClientRect();
+
+				canvas.width = Math.round(rect.width * dpr);
+				canvas.height = Math.round(rect.height * dpr);
+
+				const ctx = canvas.getContext('2d');
+				ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+				ctx.lineCap = 'round';
+				ctx.lineJoin = 'round';
+				ctx.strokeStyle = PEN_COLOUR;
+				ctx.fillStyle = PEN_COLOUR;
+
+				return { ctx: ctx, width: rect.width, height: rect.height };
+			}
+
+			function setUpPad() {
+				padCtx = sizeCanvas(drawCanvas).ctx;
+				strokes.forEach(stroke => drawStroke(padCtx, stroke, PEN_WIDTH, p => p));
+			}
+
+			function drawStroke(ctx, stroke, width, map) {
+				ctx.lineWidth = width;
+
+				if (stroke.length === 1) {
+					const p = map(stroke[0]);
+					ctx.beginPath();
+					ctx.arc(p.x, p.y, width / 2, 0, Math.PI * 2);
+					ctx.fill();
+					return
+				}
+
+				ctx.beginPath();
+				const first = map(stroke[0]);
+				ctx.moveTo(first.x, first.y);
+				for (let i = 1; i < stroke.length; i++) {
+					const p = map(stroke[i]);
+					ctx.lineTo(p.x, p.y);
+				}
+				ctx.stroke();
+			}
+
+			function padPoint(event) {
+				const rect = drawCanvas.getBoundingClientRect();
+				return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+			}
+
+			drawCanvas.addEventListener('pointerdown', function(event) {
+				if (event.pointerType === 'mouse' && event.button !== 0) {
+					return
+				}
+				event.preventDefault();
+				drawCanvas.setPointerCapture(event.pointerId);
+
+				const p = padPoint(event);
+				currentStroke = [p];
+				strokes.push(currentStroke);
+				drawStroke(padCtx, currentStroke, PEN_WIDTH, q => q);
+			});
+
+			drawCanvas.addEventListener('pointermove', function(event) {
+				if (!currentStroke) {
+					return
+				}
+				event.preventDefault();
+
+				let events = event.getCoalescedEvents ? event.getCoalescedEvents() : [];
+				if (events.length === 0) {
+					events = [event];
+				}
+
+				events.forEach(e => {
+					const last = currentStroke[currentStroke.length - 1];
+					const p = padPoint(e);
+					currentStroke.push(p);
+					drawStroke(padCtx, [last, p], PEN_WIDTH, q => q);
+				});
+			});
+
+			function endStroke() {
+				currentStroke = null;
+			}
+
+			drawCanvas.addEventListener('pointerup', endStroke);
+			drawCanvas.addEventListener('pointercancel', endStroke);
+
+			function clearDrawing() {
+				strokes = [];
+				currentStroke = null;
+				setUpPad();
+			}
+
+			/////////////
+			// FITTING //
+			/////////////
+
+			function fitAnswer() {
+				if (drawMode) {
+					fitAnswerDrawing();
+				} else {
+					fitAnswerText();
+				}
+			}
+
+			function fitAnswerText() {
+				const box = document.getElementById('revealedAnswerTextContainer');
+				const text = document.getElementById('finalAnswerText');
+
+				let low = 1;
+				let high = Math.min(
+					window.innerHeight * 0.65,
+					window.innerWidth * 0.65
+				);
+				let best = low;
+
+				while (low <= high) {
+					const mid = Math.floor((low + high) / 2);
+					text.style.fontSize = mid + 'px';
+
+					if (
+						text.scrollWidth <= box.clientWidth &&
+						text.scrollHeight <= box.clientHeight
+					) {
+						best = mid;
+						low = mid + 1;
+					} else {
+						high = mid - 1;
+					}
+				}
+
+				text.style.fontSize = best + 'px';
+			}
+
+			function fitAnswerDrawing() {
+				const canvas = document.getElementById('finalAnswerCanvas');
+				const { ctx, width, height } = sizeCanvas(canvas);
+				ctx.clearRect(0, 0, width, height);
+
+				if (strokes.length === 0) {
+					return
+				}
+
+				let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+				strokes.forEach(stroke => stroke.forEach(p => {
+					minX = Math.min(minX, p.x);
+					minY = Math.min(minY, p.y);
+					maxX = Math.max(maxX, p.x);
+					maxY = Math.max(maxY, p.y);
+				}));
+
+				const pad = PEN_WIDTH / 2;
+				minX -= pad; minY -= pad; maxX += pad; maxY += pad;
+
+				const drawingWidth = maxX - minX;
+				const drawingHeight = maxY - minY;
+				const scale = Math.min(
+					(width * 0.8) / drawingWidth,
+					(height * 0.8) / drawingHeight
+				);
+
+				const offsetX = (width - drawingWidth * scale) / 2;
+				const offsetY = (height - drawingHeight * scale) / 2;
+
+				const map = p => ({
+					x: (p.x - minX) * scale + offsetX,
+					y: (p.y - minY) * scale + offsetY
+				});
+
+				strokes.forEach(stroke => drawStroke(ctx, stroke, PEN_WIDTH * scale, map));
+			}
+			
+			////////////////
+			// PROCEEDING //
+			////////////////
+
+			function submit(){
+				const textbox = document.getElementById('textbox');
+
+				if (drawMode) {
+					console.log("submitted drawing: " + strokes.length + " strokes");
+					document.getElementById('finalAnswerText').style.display = 'none';
+					document.getElementById('finalAnswerCanvas').style.display = 'block';
+				} else {
+					console.log("submitted: " + textbox.value);
+					document.getElementById('finalAnswerText').innerText = textbox.value;
+				}
+
+				document.getElementById('revealHintBox').style.visibility = 'visible';
+
+				textbox.setAttribute('readonly', 'readonly');
+				textbox.setAttribute('disabled', 'disabled');
+				document.getElementById('inputRow').style.visibility = 'hidden';
+			}
+
+			function reveal(){
+				document.getElementById('revealHintBox').style.visibility = 'hidden';
+				document.getElementById('revealedAnswerBox').style.visibility = 'visible';
+
+				requestAnimationFrame(() => {
+					fitAnswer();
+				});
+			}
+
+			function reset(){
+				window.location.reload()
+			}
+		</script>
+</html>
